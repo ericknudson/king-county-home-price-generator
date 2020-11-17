@@ -22,7 +22,7 @@ haversine = function(long1, lat1, long2, lat2) {
 
 #helper function to return the 30 houses nearest to the user-input lat/long
 getNNgeo = function(lat, long) {
-  #create a matrix where each row is a house in our dataset, and $dist corresponds to the distance between the house and the lat/long.
+  #create a matrix where each row is a house in our dataset, and $dist corresponds to the distance between that house and the user-input lat/long.
   dist_matrix = data.frame("i"=c(1:nrow(kingcounty)),"dist"=rep(NA,nrow(kingcounty)) )
   for (i in c(1:nrow(kingcounty))) {
     dist_matrix[i,"dist"] = haversine(long, lat, kingcounty$long[i], kingcounty$lat[i])
@@ -30,7 +30,7 @@ getNNgeo = function(lat, long) {
   return(head(arrange(dist_matrix, dist), n = 30)$i)
 }
 
-#TBD 
+#TBD given a set of ids, return the most frequently-occuring neighborhood
 getNeighborhood = function(ids) {
   neighborhoods = kingcounty[ids,"neighborhood"]
   uniqueIds = unique(neighborhoods)
@@ -99,7 +99,7 @@ runModel = function(input, neighborhood) {
   return(c(pred_price,pred_price_lwr,pred_price_upr))
 }
 
-#TBD
+#helper function that implements the k-nearest neighbors method: it finds the k observations in train tnat are most similar to new_obs in covariate space
 nearest_neighbors = function(train, new_obs, k) {
   X = rbind(train,new_obs)
   X = scale(X)
@@ -114,7 +114,7 @@ nearest_neighbors = function(train, new_obs, k) {
   return(top_n[c(2:k+1),"i"])
 }
 
-#TBD
+#helper function that takes the user-input home and finds the most-similar homes using the k-nearest neighbors method.
 getKNN = function(input) {
   df = data.frame("bedrooms" = input$bedrooms, "bathrooms" = input$bathrooms, "sqft_lot"=input$sqft_lot, "floors"=input$floors, "waterfront"=as.integer(as.logical(input$waterfront)), "view"=input$view, "condition"=input$condition, "grade"=input$grade, "sqft_above"=input$sqft_above, "sqft_basement"=input$sqft_basement, "basement" = replace(input$sqft_basement, input$sqft_basement>0, 1), "age" = 2015 - input$yr_built, "age_2" = (2015 - input$yr_built)^2, "age_since_ren_or_build" = 2015 - pmax(input$yr_built,input$yr_renovated), "renovated" = replace(input$yr_renovated, input$yr_renovated>0, 1), "lat"=input$lat, "long"=input$long)
   df.X = df[,c("bedrooms","bathrooms","sqft_lot","floors","waterfront","view","condition","grade","sqft_above","sqft_basement","basement","age","age_2","age_since_ren_or_build","lat","long")]
@@ -200,7 +200,6 @@ ui <- fluidPage(
         tabPanel("Nearby Homes", 
                  br(),
                  leafletOutput(outputId = "mapPlotNear"),
-                 #br(),
                  tableOutput("nearTable")),
         tabPanel("Similar Homes", 
                  br(),
@@ -233,28 +232,38 @@ ui <- fluidPage(
 )
 
 server <- function(input, output) {
+  
+  #to run our model, we first need to figure out which neighborhood the user-input house is in, since that's an input into our model
+  #1) whenever the user adjusts the lat/long, find the 30 closest houses
   NN = reactive({
     getNNgeo(input$lat, input$long)
   })
   
+  #2) of those 30 houses, figure out the most frequently-occurring neighborhood
   neighborhood = reactive({
     getNeighborhood(NN())
   })
   
+  #now that we know the neighborhood, we can run our model
   model = reactive({
     runModel(input, neighborhood())
   })
   
+  #take our model's output and convert it into the content the UI needs: lower and upper confidence intervals, the perentile, etc.
   output$pred_price <- renderText({ 
     model_output = model()
     pred_price = model_output[1]
-    pred_price_lwr = model_output[2]
-    pred_price_upr = model_output[3]
-    percentile = round(sum(kingcounty$price < pred_price)/nrow(kingcounty)*100,0)
-    n = neighborhood()
-    neighbors = subset(kingcounty, neighborhood == n)
-    neigh_percentile = round(sum(neighbors$price < pred_price)/nrow(neighbors)*100,0)
     
+    #calculate 95% confidence interval
+    pred_price_lwr = model_output[2] 
+    pred_price_upr = model_output[3] 
+    
+    #calculate percentile for entire dataset and just the zip code
+    percentile = round(sum(kingcounty$price < pred_price)/nrow(kingcounty)*100,0)
+    zipneighbors = subset(kingcounty, zipcode = input$zipcode)
+    zipneighbors_percentile = round(sum(zipneighbors$price < pred_price)/nrow(zipneighbors)*100,0)
+    
+    #send text to the UI
     paste0("Your home's estimated value is between $", 
            format(round(as.numeric(pred_price_lwr), 0), big.mark=","),
            " and $",
@@ -263,21 +272,20 @@ server <- function(input, output) {
            percentile, 
            ifelse(percentile %% 10 == 1,"st",ifelse(percentile %% 10 == 2,"nd",ifelse(percentile %% 10 == 3,"rd","th"))),
            " percentile of King County and the ",
-           neigh_percentile,
-           ifelse(neigh_percentile %% 10 == 1,"st",ifelse(neigh_percentile %% 10 == 2,"nd",ifelse(neigh_percentile %% 10 == 3,"rd","th"))),
-           " for your neighborhood")
+           zipneighbors_percentile,
+           ifelse(zipneighbors_percentile %% 10 == 1,"st",ifelse(zipneighbors_percentile %% 10 == 2,"nd",ifelse(zipneighbors_percentile %% 10 == 3,"rd","th"))),
+           " for your zip code")
   })
   
+  #plot the histogram of home prices, using a vertical line for the user's estimated home value
   output$distPlot <- renderPlot({
     model_output = model()
     pred_price = model_output[1]
-    #print(paste(c("pred_price_hist: "),pred_price))
-    #print(paste(c("neighborhood_hist: ",model_output[4])))
     ggplot(kingcounty,aes(x=price)) + 
       geom_histogram(data=kingcounty,fill = "blue", alpha = 0.5, bins = 200) +
-      geom_histogram(data=subset(kingcounty,neighborhood == neighborhood()),fill = "blue", alpha = .8, bins = 100) +
+      geom_histogram(data=subset(kingcounty,zipcode == input$zipcode),fill = "blue", alpha = .8, bins = 100) +
       coord_cartesian(xlim = c(0, 2000000)) +
-      xlab("Home sale prices for King County (your neighborhood in dark blue)") +
+      xlab("Home sale prices for King County (your zip code in dark blue)") +
       geom_vline(xintercept=pred_price, 
                  color = "black", size=1.5) +
       geom_text(aes(x=pred_price + 30000, 
@@ -286,6 +294,7 @@ server <- function(input, output) {
                 colour="black")
   })
   
+  #plot nearby homes on a map
   output$mapPlotNear = renderLeaflet({
     n = NN()
     m <- leaflet() %>%
@@ -297,6 +306,7 @@ server <- function(input, output) {
     m 
   })
   
+  #show a table of those nearby homes
   output$nearTable = renderTable({
     neighbors = NN()
     kingcounty[neighbors,c("price",
@@ -317,10 +327,12 @@ server <- function(input, output) {
                            "neighborhood")]
   })
   
+  #button for calculating most-similar homes (placing behind a button since this is a heavy operation)
   calcSim <- eventReactive(input$calcSim, {
     getKNN(input)
   })
   
+  #table of most-similar homes
   output$simTable = renderTable({
     top_neighbors = calcSim()
     kingcounty[top_neighbors,c("price",
@@ -341,6 +353,7 @@ server <- function(input, output) {
                            "neighborhood")]
   })
   
+  #map of most-similar homes
   output$mapPlotSim = renderLeaflet({
     top_neighbors = calcSim()
     m <- leaflet() %>%

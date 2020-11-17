@@ -5,9 +5,10 @@ library(ggplot2)
 set.seed(1)
 
 #load pre-computed data
-kingcounty = readRDS("data/kingcounty.rds")
-lm = readRDS("data/lm.rds")
+kingcounty = readRDS("resources/kingcounty.rds")
+lm = readRDS("resources/lm.rds")
 
+#HELPER FUNCTIONS
 #helper function to calculate the distance between two lat/longs
 haversine = function(long1, lat1, long2, lat2) {
   R <- 6371 # Earth mean radius [km]
@@ -19,8 +20,9 @@ haversine = function(long1, lat1, long2, lat2) {
   return(d) # Distance in km
 }
 
-#helper function to return the top 30 nearest houses in our dataset given a lat/long
+#helper function to return the 30 houses nearest to the user-input lat/long
 getNNgeo = function(lat, long) {
+  #create a matrix where each row is a house in our dataset, and $dist corresponds to the distance between the house and the lat/long.
   dist_matrix = data.frame("i"=c(1:nrow(kingcounty)),"dist"=rep(NA,nrow(kingcounty)) )
   for (i in c(1:nrow(kingcounty))) {
     dist_matrix[i,"dist"] = haversine(long, lat, kingcounty$long[i], kingcounty$lat[i])
@@ -28,7 +30,7 @@ getNNgeo = function(lat, long) {
   return(head(arrange(dist_matrix, dist), n = 30)$i)
 }
 
-#helper function to 
+#TBD 
 getNeighborhood = function(ids) {
   neighborhoods = kingcounty[ids,"neighborhood"]
   uniqueIds = unique(neighborhoods)
@@ -40,6 +42,7 @@ inflate = function(x) {
   x = x * (1+ (273.94 - 169.66363)/169.66363)
 }
 
+#helper function that takes a user-input house and returns a price prediction
 runModel = function(input, neighborhood) {
   #read in user-input data from UI
   df = data.frame("bedrooms" = input$bedrooms, 
@@ -96,6 +99,7 @@ runModel = function(input, neighborhood) {
   return(c(pred_price,pred_price_lwr,pred_price_upr))
 }
 
+#TBD
 nearest_neighbors = function(train, new_obs, k) {
   X = rbind(train,new_obs)
   X = scale(X)
@@ -110,6 +114,7 @@ nearest_neighbors = function(train, new_obs, k) {
   return(top_n[c(2:k+1),"i"])
 }
 
+#TBD
 getKNN = function(input) {
   df = data.frame("bedrooms" = input$bedrooms, "bathrooms" = input$bathrooms, "sqft_lot"=input$sqft_lot, "floors"=input$floors, "waterfront"=as.integer(as.logical(input$waterfront)), "view"=input$view, "condition"=input$condition, "grade"=input$grade, "sqft_above"=input$sqft_above, "sqft_basement"=input$sqft_basement, "basement" = replace(input$sqft_basement, input$sqft_basement>0, 1), "age" = 2015 - input$yr_built, "age_2" = (2015 - input$yr_built)^2, "age_since_ren_or_build" = 2015 - pmax(input$yr_built,input$yr_renovated), "renovated" = replace(input$yr_renovated, input$yr_renovated>0, 1), "lat"=input$lat, "long"=input$long)
   df.X = df[,c("bedrooms","bathrooms","sqft_lot","floors","waterfront","view","condition","grade","sqft_above","sqft_basement","basement","age","age_2","age_since_ren_or_build","lat","long")]
@@ -159,9 +164,12 @@ ui <- fluidPage(
                   min = 0, max = 4, value = 0),
       sliderInput("condition", h4("Condition"),
                   min = 1, max = 5, value = 3),
+      p("Scale described "),
+      a("here",href="https://info.kingcounty.gov/assessor/esales/Glossary.aspx?type=r"),
       sliderInput("grade", h4("Grade"),
                   min = 1, max = 13, value = 7),
-      p("Where 1-3 falls short of building construction and design, 7 has an average level of construction and design, and 11-13 have a high quality level of construction and design"),
+      p("Scale described "),
+      a("here",href="https://info.kingcounty.gov/assessor/esales/Glossary.aspx?type=r"),
       numericInput("yr_built", 
                    h4("Year Built"), 
                    value = 1975),
